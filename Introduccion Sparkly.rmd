@@ -1,0 +1,265 @@
+---
+title: "Clase 4 Big Data"
+author: "José Fernando zeea"
+date: "6/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+library(sparklyr)
+library(DBI)
+library("ggplot2")
+library("corrr")
+library("dbplot")
+library("rmarkdown")
+library(sparklyr)
+library(dplyr)
+```
+
+
+Apache Spark se puede considerar un sistema de computación en clúster de propósito general y orientado a la velocidad. Proporciona APIs en Java, Scala, Python.
+
+Algunas herramientas son:
+
+* Spark SQL (para el procesamiento de datos estructurados basada en SQL).
+* MLlib para implementar machine learning.
+* GraphX para el procesamiento de grafos.
+* Spark Streaming.
+* Apache Hive es un software que forma parte del ecosistema de Hadoop. Es utilizado para gestionar enormes datasets almacenados bajo el HDFS de Hadoop y realizar consultas (queries) sobre los mismos.
+
+
+Para la gestión del cluster soporta:
+
+Para la gestión del clúster, Spark soporta las opciones siguientes:
+
+* Spark Standalone (Cluster Spark Nativo)
+* Hadoop YARN
+* Apache Mesos.16
+
+
+
+```{r}
+ruta <- "C:/Users/Home/Documents/Laboral2020/Konrad Lorenz/BigData/Clase 4"
+```
+
+
+```{r}
+system("java -version")
+```
+
+
+```{r}
+
+packageVersion("sparklyr")
+
+```
+
+
+Se realiza la conección de Spark:
+
+```{r}
+library(sparklyr)
+sc <- spark_connect(master = "local", version = "2.3")
+```
+
+
+```{r}
+cars <- copy_to(sc, mtcars)
+```
+
+Los datos son copiados en Spark.
+```{r}
+cars
+```
+
+
+Se puede traer resultados a R (esto es viable cuando el tamaño de los resultados no es tan grande), los argumentos son la conexión con Spark y se trabaja de la forma usual con SQL:
+
+```{r}
+library(DBI)
+dbGetQuery(sc, "SELECT count(*) FROM mtcars")
+```
+
+
+```{r}
+count(cars)
+```
+
+Se pueden usar los pipelines usuales:
+
+```{r}
+cars %>% summarise(cuenta = n())
+```
+
+
+Los resultados son "empujados" a R:
+
+
+```{r}
+select(cars, hp, mpg) %>%
+  sample_n(100) %>%
+  collect() %>% # Mandar los datos a R
+  plot()
+```
+
+Existen funciones específicas para realizar regresión, esta función es parte de la Spark Machine Learning Library (MLlib)
+
+
+```{r}
+model <- ml_linear_regression(cars, mpg ~ hp)
+model
+```
+
+
+
+```{r}
+class(model)
+```
+
+Para poder realizar predicciones sobre un conjunto de datos, este conjunto de datos debe ser de Spark:
+
+
+```{r}
+model %>%
+  ml_predict(copy_to(sc, data.frame(hp = 250 + 10 * 1:10))) %>%
+  transmute(hp = hp, mpg = prediction) %>%
+  full_join(select(cars, hp, mpg)) %>%
+  collect() %>% # Coloca los valores en R
+  plot()
+```
+
+Observe la clase de la tabla, para poder graficar los resultados se convierte en un dataframe esta tabla.
+
+```{r}
+class(model %>%
+  ml_predict(copy_to(sc, data.frame(hp = 250 + 10 * 1:10))) %>%
+  transmute(hp = hp, mpg = prediction) %>%
+  full_join(select(cars, hp, mpg)))
+```
+. 
+
+En la práctica para leer los archivos se usa un sistema de datos distribuido como HDFS (sistema de ficheros distribuido de Hadoop.).
+
+Se pueden escribir archivos en csv:
+
+```{r}
+setwd(ruta)
+spark_write_csv(cars, "cars.csv")
+```
+
+
+```{r}
+rm(cars)
+```
+
+Se puede leer ese arhivo de spark:
+
+```{r}
+cars <- spark_read_csv(sc, "cars.csv")
+```
+
+Para las ocasiones en que una función no está disponible para Spark se puede usar código R (una función). Debe ser un último recurso para evitar ciertas complejidades.
+
+```{r}
+cars %>% spark_apply(~round(.x))
+```
+
+Después de terminar un análisis es importante desconectarse:
+
+
+```{r}
+spark_disconnect_all()
+
+```
+
+
+El paquete Spark utiliza los procesos de empujar computación, recolectar resultados. Lo anterior permite utilizar las ventajas analíticas de Spark en vez de las de R. Por ejemplo para el ajuste de una regresión líneal se pueden utilizar la función ml_linear_regression() de Spark.
+
+
+```{r}
+sc <- spark_connect(master = "local", version = "2.3")
+cars <- copy_to(sc, mtcars)
+```
+
+Se calculará el promedio del ingreso para cada una de las variables:
+
+```{r}
+summarize_all(cars, mean)
+```
+
+Nota: estos datos no están siendo importados a estructuras de R. dplyr convierte los datos en sentencias SQL que son enviadas a Spark. 
+
+```{r}
+summarize_all(cars, mean) %>% show_query()
+```
+
+dplyr no sólo es más sintético y permite centrar en los análisis en lugar de temas de sintaxis.
+
+```{r}
+cars %>%
+  mutate(transmission = ifelse(am == 0, "automatic", "manual")) %>%
+  group_by(transmission) %>%
+  summarise_all(mean)
+```
+
+Ejercicios: realizar diferentes consultar con la base de datos cars.
+
+
+
+Funciones integradas (Built-in functions): Spark Sql usa las convenciones de Hive SQL. Se pueden llamar esas funciones desde las consultas de dplyr. 
+
+
+```{r}
+summarise(cars, mpg_percentile = percentile(mpg, 0.25))
+```
+
+
+```{r}
+summarise(cars, mpg_percentile = percentile(mpg, 0.25)) %>%
+  show_query()
+```
+
+percentile es una función de Spark SQL.
+
+
+
+Para pasar múltiples valores de percentil se peude usar una estructura de Hive llamada arreglo:
+
+```{r}
+summarise(cars, mpg_percentile = percentile(mpg, array(0.25, 0.5, 0.75)))
+
+```
+
+
+
+```{r}
+summarise(cars, mpg_percentile = percentile(mpg, array(0.25, 0.5, 0.75))) %>%
+  mutate(mpg_percentile = explode(mpg_percentile))
+```
+
+
+Con la función explode se coloca en un vector cada uno de los resultados de un arreglo.
+
+Existen varias funciones de hive: https://therinspark.com/appendix.html#hive-functions
+
+
+Se pueden calcualr correlaciones:
+
+```{r}
+ml_corr(cars)
+```
+
+
+La librería corrr es del tidyverse y está especializado en calcular correlaciones, cuando se use con un dataframe de Spark hace uso de ml_corr:
+
+```{r}
+library(corrr)
+correlate(cars, use = "pairwise.complete.obs", method = "pearson") 
+```
+
+
