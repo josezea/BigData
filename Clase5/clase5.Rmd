@@ -1,0 +1,100 @@
+
+---
+title: "clase5"
+output:
+  html_document:
+    toc: true
+---
+
+
+```{r}
+library(Rcpp)
+library(sparklyr)
+library(dplyr)
+#install.packages("nycflights13")
+library(nycflights13)
+#install.packages("tictoc")
+library(tictoc)
+library(data.table)
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+```{r}
+sc <- spark_connect(method="databricks") 
+```
+
+
+```{r}
+spark_context(sc) %>% 
+  invoke("getExecutorMemoryStatus") %>% 
+  names()
+```
+
+
+```{r}
+data(flights)
+dim(flights)
+```
+
+
+```{r}
+head(flights)
+```
+
+
+```{r}
+flights_spark <- copy_to(sc, flights)
+```
+
+
+```{r}
+src_tbls(sc)
+```
+
+
+```{r}
+#Aeropuertos más atrasado en la salida:
+tic()
+consulta <- flights_spark %>% group_by(origin, dest) %>% summarise(prom_retraso = mean(dep_delay)) %>% arrange(desc(prom_retraso))
+toc()
+```
+
+
+```{r}
+consulta
+```
+
+
+```{r}
+flights <- as.data.table(flights_spark)
+```
+
+
+```{r}
+tic()
+consultab <- flights[,.(prom_retraso = mean(dep_delay)), by = .(origin, dest)]
+consultab <- consultab[order(prom_retraso, decreasing = T),,]
+consultab
+toc()
+```
+
+
+```{r}
+consulta
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
