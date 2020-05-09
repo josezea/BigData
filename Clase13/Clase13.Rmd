@@ -1,0 +1,155 @@
+---
+title: "Untitled"
+author: "José Fernando zeea"
+date: "8/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+profiles <- read.csv("profiles.csv")
+```
+
+
+```{r}
+library(sparklyr)
+library(ggplot2)
+library(dbplot)
+library(dplyr)
+
+sc <- spark_connect(master = "local")
+```
+
+
+```{r}
+okc <- spark_read_csv(
+  sc, 
+  "profiles.csv", 
+  escape = "\"", 
+  memory = FALSE,
+  options = list(multiline = TRUE)
+) 
+```
+
+```{r}
+colnames(okc)
+```
+
+```{r}
+okc(okc)
+```
+
+Observe que income y height que son variables continuas vienen como caracter y se requiere recategorizar, además variables como si la persona bebe, con sume drogdas y el trabajo viene como información faltante lo cual haría que ese registro se pierda a la hora de entrenar un modelo.
+
+```{r}
+
+okc <- mutate(okc, height = as.numeric(height),
+         income = ifelse(income == "-1", NA, as.numeric(income)),
+                         sex = ifelse(is.na(sex), "missing", sex),
+         drinks = ifelse(is.na(drinks), "missing", drinks), 
+         drugs = ifelse(is.na(drugs), "missing", drugs), 
+         job = ifelse(is.na(job), "missing", job),
+         religion = ifelse(is.na(religion), "missing", religion))
+```
+
+Se construirá la variable de interés  
+
+```{r}
+okc <- okc %>%
+  mutate(
+    not_working = ifelse(job %in% c("student", "unemployed", "retired"), 1 , 0)
+  )
+
+okc %>% 
+  group_by(not_working) %>% 
+  tally()
+```
+
+```{r}
+data_splits <- sdf_random_split(okc, training = 0.8, testing = 0.2, seed = 42)
+okc_train <- data_splits$training
+okc_test <- data_splits$testing
+```
+
+
+```{r}
+okc_train %>%
+  group_by(not_working) %>%
+  tally() %>%
+  mutate(frac = n / sum(n))
+```
+
+```{r}
+okc_train %>%
+  group_by(not_working) %>%
+  tally() %>%
+  mutate(frac = n / sum(n))
+```
+
+```{r}
+okc_test %>%
+  group_by(not_working) %>%
+  tally() %>%
+  mutate(frac = n / sum(n))
+```
+
+Observe que las proporciones de la variable de interés se mantienen  en la muetra de entrenamiento y de test.
+
+
+Algunas de las variables continuas más relacionadas con la variable de interés:
+
+```{r}
+sdf_describe(okc_train, cols = c("age", "income"))
+
+```
+
+```{r}
+dbplot_histogram(okc_train, age)
+
+```
+
+
+La asociación entre la religión y la variable que da cuenta si la persona no trabaja:
+
+```{r}
+prop_data <- okc_train %>%
+  mutate(religion = regexp_extract(religion, "^\\\\w+", 0)) %>% 
+  group_by(religion, not_working) %>%
+  tally() %>%
+  group_by(religion) %>%
+  summarize(
+    count = sum(n),
+    prop = sum(not_working * n) / sum(n)
+  ) %>%
+  mutate(se = sqrt(prop * (1 - prop) / count)) %>%
+  collect()
+
+```
+
+```{r}
+prop_data %>%
+  ggplot(aes(x = religion, y = prop)) + geom_point(size = 2) +
+  geom_errorbar(aes(ymin = prop - 1.96 * se, ymax = prop + 1.96 * se),
+                width = .1) +
+  geom_hline(yintercept = sum(prop_data$prop * prop_data$count) /
+                              sum(prop_data$count))
+```
+
+Otra variable relevante a analizar es la relación de la ocupación con la frecuencia de consumo de alcohor y de drogras:
+
+```{r}
+contingency_tbl <- okc_train %>% 
+  sdf_crosstab("drinks", "drugs") %>%
+  collect()
+```
+
+
+```{r}
+
+```
+
