@@ -1,0 +1,264 @@
+---
+title: "Untitled"
+author: "José Fernando zeea"
+date: "15/5/2020"
+output: html_document
+---
+
+```{r}
+library(tictoc)
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Varios procedimientos en donde los procesos son independientes son susceptibles a paralelizar, por ejemplo el método conocido como bootstrap permite estimar intervalos de confianza para cuantificar la incertidumbre en las estimaciones
+
+```{r}
+datos <- iris[iris$Species != "setosa", c(1, 5)]
+```
+
+Realizaremos 10000 veces el procedimeinto bootstrap:
+
+
+
+```{r}
+trials <- 10000
+res <- data.frame()
+system.time({
+  trial <- 1
+  while(trial <= trials) {
+    ind <- sample(100, 100, replace=TRUE)
+    result1 <- glm(Species ~ Sepal.Length, data = datos[ind,], family =  
+                   binomial(logit))
+    r <- coefficients(result1)
+    res <- rbind(res, r)
+    trial <- trial + 1
+  }
+})
+```
+
+```{r}
+trials <- seq(1, 10000)
+boot_fx <- function(trial) {
+  ind <- sample(100, 100, replace=TRUE)
+  result1 <- glm(Species ~ Sepal.Length, data = datos[ind,], family =  
+                   binomial(logit))
+  r <- coefficients(result1)
+  res <- rbind(data.frame(), r)
+}
+system.time({
+  results <- lapply(trials, boot_fx)
+})
+```
+
+```{r}
+library(parallel)
+numCores <- detectCores()
+numCores
+```
+
+
+```{r}
+trials <- seq(1, 10000)
+boot_fx <- function(trial) {
+  ind <- sample(100, 100, replace=TRUE)
+  result1 <- glm(Species ~ Sepal.Length, data = datos[ind,], family =  
+                   binomial(logit))
+  r <- coefficients(result1)
+  res <- rbind(data.frame(), r)
+}
+system.time({
+  results <- mclapply(trials, boot_fx, mc.cores = numCores)
+})
+```
+
+# Foreach
+
+```{r}
+for (i in 1:3) {
+  print(sqrt(i))
+}
+```
+
+Correr el programa con foreach tiene un enfoque muy similar:
+
+```{r}
+library(foreach)
+foreach (i=1:3) %do% {
+  sqrt(i)
+}
+unlist()
+```
+
+
+```{r}
+library(foreach)
+```
+
+
+```{r}
+a <- foreach (i=1:3) %do% {
+  sqrt(i)
+}
+unlist(a)
+```
+
+También puede combinarse los resultados en un vector:
+
+```{r}
+a <- foreach (i=1:3, .combine = c) %do% {
+  sqrt(i)
+}
+a
+```
+
+
+
+
+foreach soporta un parámetro llamado do paralle que hace uso de todos los procesarores:
+
+
+```{r}
+library(foreach)
+library(doParallel)
+```
+
+```{r}
+registerDoParallel(numCores)  # use multicore, set to the number of our cores
+foreach (i=1:3) %dopar% {
+  sqrt(i)
+}
+```
+Combinando los resultados:
+
+```{r}
+registerDoParallel(numCores)  # use multicore, set to the number of our cores
+foreach (i=1:3, .combine = c) %dopar% {
+  sqrt(i)
+}
+
+```
+
+
+Veamos el ejemplo del bootstrap:
+
+```{r}
+trials <- 10000
+system.time({
+  r <- foreach(icount(trials), .combine=rbind) %dopar% {
+    ind <- sample(100, 100, replace=TRUE)
+    result1 <- glm(Species ~ Sepal.Length, data = datos,   
+                   family=binomial(logit))
+    coefficients(result1)
+  }
+})
+
+```
+
+En contraste con la velocidad si no se paraleliza:
+
+```{r}
+# And compare that to what it takes to do the same analysis in serial
+system.time({
+  r <- foreach(icount(trials), .combine=rbind) %do% {
+    ind <- sample(100, 100, replace=TRUE)
+    result1 <- glm(Species ~ Sepal.Length, data = datos,   
+                   family=binomial(logit))
+    coefficients(result1)
+  }
+})
+```
+
+```{r}
+stopImplicitCluster()
+```
+
+
+También puede paralelizarse un lapply:
+
+
+```{r}
+library(parallel)
+trials <- seq(1, 10000)
+boot_fx <- function(trial) {
+  datos <- iris[iris$Species != "setosa", c(1, 5)]
+  ind <- sample(100, 100, replace=TRUE)
+  result1 <- glm(Species ~ Sepal.Length, data = datos[ind,], family =  
+                   binomial(logit))
+  r <- coefficients(result1)
+  res <- rbind(data.frame(), r)
+}
+system.time({
+cl <- makeCluster(detectCores())
+results <- parLapply(cl, trials, boot_fx)
+})
+stopCluster(cl)
+```
+
+```{r}
+detectCores()
+library(snow)
+```
+
+
+```{r}
+trials <- seq(1, 10000)
+boot_fx <- function(trial) {
+  datos <- iris[iris$Species != "setosa", c(1, 5)]
+  ind <- sample(100, 100, replace=TRUE)
+  result1 <- glm(Species ~ Sepal.Length, data = datos[ind,], family =  
+                   binomial(logit))
+  r <- coefficients(result1)
+  res <- rbind(data.frame(), r)
+}
+system.time({
+clus <- snow::makeCluster(4)
+results <- snow::parLapply(cl, trials, boot_fx)
+snow::stopCluster(cl)
+})
+```
+
+
+# Rcpp. la mejor optimización con Rcpp
+
+```{r}
+library(tictoc)
+```
+
+```{r}
+fib <- function(n) {
+if (n < 2) return(n)
+return(fib(n-1) + fib(n-2))
+}
+## Using it on first 11 arguments
+unlist(lapply(0:10, fib))
+```
+
+```{r}
+library(tictoc)
+tic()
+fib(35)
+toc()
+```
+
+
+```{r}
+library(Rcpp)
+cppFunction('int g(int n) {
+if (n < 2) return(n);
+return(g(n-1) + g(n-2)); }')
+## Using it on first 11 arguments
+```
+
+```{r}
+tic()
+g(35)
+toc()
+```
+
+# Ejercicio: Propopagación de una enfermadad
+
+
